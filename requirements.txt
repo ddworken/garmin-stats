@@ -1,0 +1,4 @@
+python-dateutil
+garminconnect
+cachetools
+flask
