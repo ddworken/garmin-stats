@@ -1,13 +1,11 @@
-# coding: utf-8
 import math
 import garminconnect
-from typing import Mapping, Any, List
+from typing import Mapping, List
 import os
 from datetime import date, timedelta, datetime
-import json
 from dataclasses import dataclass
 from dateutil.parser import parse
-import cachetools.func
+from flask import Flask, Response
 
 
 def timestamp_from_millis(ts: int) -> datetime:
@@ -24,28 +22,19 @@ def authenticate() -> garminconnect.Garmin:
         email = os.environ['GARMIN_USERNAME']
         password = os.environ['GARMIN_PASSWORD']
     else:
-        raise Exception(str(os.environ))
+        raise Exception("No garmin credentials available!")
 
-    garmin = garminconnect.Garmin(email, password)
-    garmin.login()
+    garmin = garminconnect.Garmin()
+    garth_path = os.path.expanduser("~/.garth/")
+    if os.path.exists(garth_path):
+        garmin.login(tokenstore=garth_path)
     if garmin.display_name:
         return garmin
-    garmin.login(tokenstore=os.path.expanduser("~/.garth/"))
+    print("Falling back to logging in via email/password")
+    garmin = garminconnect.Garmin(email, password)
+    garmin.login()
     garmin.garth.dump( "~/.garth")
     return garmin
-
-def get_zone(hr: int) -> int:
-    if hr < 98:
-        return 0
-    if hr <= 116:
-        return 1
-    if hr <= 136:
-        return 2
-    if hr <= 155:
-        return 3
-    if hr <= 175:
-        return 4
-    return 5
 
 @dataclass
 class ActivityInfo:
@@ -61,8 +50,13 @@ def get_zone_info(garmin: garminconnect.Garmin, activity_id: int) -> Mapping[int
         ret[zone['zoneNumber']] = zone['secsInZone']
     return ret
 
-@cachetools.func.ttl_cache(maxsize=1000, ttl=60)
-def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str, include_non_activity_data: bool) -> Mapping[int, int]:
+CACHED_ZONE_INFO: Mapping[str, Mapping[int, int]] = {}
+
+def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str) -> Mapping[int, int]:
+    # Check if the result has already been cached
+    if day_to_check in CACHED_ZONE_INFO:
+        return CACHED_ZONE_INFO[day_to_check]
+
     # Get the activity infos
     activity_infos: List[ActivityInfo] = []
     all_activities_resp = garmin.get_activities_fordate(day_to_check)
@@ -74,31 +68,15 @@ def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str, in
             zone_info=get_zone_info(garmin, activity['activityId']),
         ))
 
-    # Get the HR data (that has a 2 minute granularity) and calculate based on it, but exclude any HRs during activities
-    hr_data = garmin.get_heart_rates(day_to_check)
+    # Merge together the zone info across all the activities
     zone_to_elapsed_time = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    previousTs = timestamp_from_millis(hr_data['heartRateValues'][0][0])
-    for unixTs, hr in hr_data['heartRateValues']:
-        ts = timestamp_from_millis(unixTs)
-        time_elapsed = (ts - previousTs)
-        if hr is None:
-            continue
-        previousTs = ts
-        if is_during_activity(ts, activity_infos):
-            continue
-        if include_non_activity_data:
-            zone_to_elapsed_time[get_zone(hr)] += time_elapsed.total_seconds() # TODOOOOOOO
-
-    # Merge in the more precise data from during activities that has a better than 2 minute granularity
     for activity in activity_infos:
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, activity.zone_info)
-    return zone_to_elapsed_time
 
-def is_during_activity(ts: datetime, activity_infos: List[ActivityInfo]) -> bool:
-    for activity in activity_infos:
-        if ts > activity.start_time and ts < activity.end_time:
-            return True
-    return False
+    # Store it in the cache if it is stable
+    if day_to_check != date.today().isoformat():
+        CACHED_ZONE_INFO[day_to_check] = zone_to_elapsed_time
+    return zone_to_elapsed_time
 
 def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
     ret = {}
@@ -107,11 +85,11 @@ def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
             ret[k] = ret.get(k, 0) + v
     return ret
 
-def average_time_in_zone_2_plus(garmin: garminconnect.Garmin, num_days: int, start_days_ago: int, include_non_activity_data=False) -> timedelta:
+def average_time_in_zone_2_plus(garmin: garminconnect.Garmin, num_days: int, start_days_ago: int) -> timedelta:
     zone_to_elapsed_time = {}
     for days_ago in range(0, num_days):
         day_to_check = (date.today() - timedelta(days=days_ago) - timedelta(days=start_days_ago)).isoformat()
-        ztet = get_zone_to_elapsed_time(garmin, day_to_check, include_non_activity_data)
+        ztet = get_zone_to_elapsed_time(garmin, day_to_check)
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, ztet)
     return timedelta(seconds=zone_to_elapsed_time[2] + zone_to_elapsed_time[3] + zone_to_elapsed_time[4] + zone_to_elapsed_time[5])
 
@@ -128,6 +106,10 @@ def pretty_print_td(td: timedelta) -> str:
 def build_stats() -> str:
     garmin = authenticate()
     ret = ""
+    ret += "Daily Load: "
+    ret += str(math.floor(average_time_in_zone_2_plus(garmin, 1, 0).seconds/60))
+    ret += "\n\n"
+
     ret += "Weekly Stats:\n"
     ret += f"Week of {date.today().isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 0)) + "\n"
     ret += f"Week of {(date.today()-timedelta(days=7)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 7)) + "\n"
@@ -136,23 +118,22 @@ def build_stats() -> str:
     ret += f"Week of {(date.today()-timedelta(days=28)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 28)) + "\n"
     ret += "\n"
 
-    ret += "Trailing Load Average\n"
+    ret += "Trailing Load Average:\n"
     for i in range(14):
         ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load " + str(math.floor(average_time_in_zone_2_plus(garmin, 7, i).seconds/60)) + "\n"
     ret += "\n"
 
-    ret += "Monthly Zone Breakdown\n"
+    ret += "Monthly Zone Breakdown:\n"
     zone_to_elapsed_time = {}
     for days_ago in range(0, 30):
         day_to_check = (date.today() - timedelta(days=days_ago)).isoformat()
-        ztet = get_zone_to_elapsed_time(garmin, day_to_check, include_non_activity_data=False)
+        ztet = get_zone_to_elapsed_time(garmin, day_to_check)
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, ztet)
     for i in range(0, 6):
         ret += f"Zone {i}: {pretty_print_td(timedelta(seconds=zone_to_elapsed_time[i]))}\n"
     ret += "\n"
     return ret
 
-from flask import Flask, Response
 app = Flask(__name__)
 
 @app.route('/garmin-stats')
