@@ -74,7 +74,7 @@ def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str) ->
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, activity.zone_info)
 
     # Store it in the cache if it is stable
-    if day_to_check != date.today().isoformat():
+    if day_to_check != date.today().isoformat() and day_to_check != (date.today() - timedelta(days=1)).isoformat():
         CACHED_ZONE_INFO[day_to_check] = zone_to_elapsed_time
     return zone_to_elapsed_time
 
@@ -103,6 +103,12 @@ def pretty_print_td(td: timedelta) -> str:
         return f"{hours} hours and {minutes} minutes"
     return f"{minutes} minutes"
 
+def lpad(s: str, n: int) -> str:
+    if len(s) >= n:
+        return s 
+    num_needed = n-len(s)
+    return (' '*num_needed)+s
+
 def build_stats() -> str:
     garmin = authenticate()
     ret = ""
@@ -118,10 +124,28 @@ def build_stats() -> str:
     ret += f"Week of {(date.today()-timedelta(days=28)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 28)) + "\n"
     ret += "\n"
 
-    ret += "Trailing Load Average:\n"
+    ret += "Trailing Weekly Load Average:\n"
     for i in range(14):
-        ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load " + str(math.floor(average_time_in_zone_2_plus(garmin, 7, i).seconds/60)) + "\n"
+        load = math.floor(average_time_in_zone_2_plus(garmin, 7, i).seconds/60)
+        ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
+        ret += lpad(str(load), 3)
+        # Add a basic graph to visualize the trailing load
+        ret += " "
+        ret += "-"*math.floor(load/10)
+        ret += "\n"
     ret += "\n"
+
+    ret += "Daily Load:\n"
+    for i in range(14):
+        load = math.floor(average_time_in_zone_2_plus(garmin, 1, i).seconds/60)
+        ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
+        ret += lpad(str(load), 3)
+        # Add a basic graph to visualize the trailing load
+        ret += " "
+        ret += "-"*math.floor(load/10)
+        ret += "\n"
+    ret += "\n"
+
 
     ret += "Monthly Zone Breakdown:\n"
     zone_to_elapsed_time = {}
