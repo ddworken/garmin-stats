@@ -134,26 +134,7 @@ def build_stats() -> str:
         ret += f"* {activity.name} ({activity.description}): {pretty_print_td(activity.end_time - activity.start_time)} - Load {td_to_load(sum_zone_info_in_zone_2_plus(activity.zone_info))}\n"
     ret += "\n"
 
-    ret += "Weekly Stats:\n"
-    ret += f"Week of {date.today().isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 0)) + "\n"
-    ret += f"Week of {(date.today()-timedelta(days=7)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 7)) + "\n"
-    ret += f"Week of {(date.today()-timedelta(days=14)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 14)) + "\n"
-    ret += f"Week of {(date.today()-timedelta(days=21)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 21)) + "\n"
-    ret += f"Week of {(date.today()-timedelta(days=28)).isoformat()}: " + pretty_print_td(average_time_in_zone_2_plus(garmin, 7, 28)) + "\n"
-    ret += "\n"
-
-    ret += "Trailing Weekly Load Average:\n"
-    for i in range(14):
-        load = td_to_load(average_time_in_zone_2_plus(garmin, 7, i))
-        ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
-        ret += lpad(str(load), 3)
-        # Add a basic graph to visualize the trailing load
-        ret += " "
-        ret += "-"*math.floor(load/10)
-        ret += "\n"
-    ret += "\n"
-
-    ret += "Daily Load:\n"
+    ret += "Historical Daily Load:\n"
     for i in range(14):
         load = td_to_load(average_time_in_zone_2_plus(garmin, 1, i))
         ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
@@ -164,6 +145,27 @@ def build_stats() -> str:
         ret += "\n"
     ret += "\n"
 
+    ret += "Historical Weekly Load Average:\n"
+    for i in range(14):
+        load = td_to_load(average_time_in_zone_2_plus(garmin, 7, i))
+        ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
+        ret += lpad(str(load), 3)
+        # Add a basic graph to visualize the trailing load
+        ret += " "
+        ret += "-"*math.floor(load/10)
+        ret += "\n"
+    ret += "\n"
+
+    ret += "Historical Weekly Stats:\n"
+    for week_num in range(0, 20):
+        load = td_to_load(average_time_in_zone_2_plus(garmin, 7, week_num*7))
+        ret += f"Week of {(date.today()-timedelta(days=week_num*7)).isoformat()}: " 
+        ret += lpad(str(load), 3)
+        # Add a basic graph to visualize the trailing load
+        ret += " "
+        ret += "-"*math.floor(load/10)
+        ret += "\n"
+    ret += "\n"
 
     ret += "Monthly Zone Breakdown:\n"
     zone_to_elapsed_time = {}
