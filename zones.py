@@ -1,6 +1,6 @@
 import math
 import garminconnect
-from typing import Mapping, List
+from typing import Mapping, List, Optional
 import os
 from datetime import date, timedelta, datetime
 from dataclasses import dataclass
@@ -45,27 +45,48 @@ class ActivityInfo:
     name: str 
     description: str 
 
-def get_zone_info(garmin: garminconnect.Garmin, activity_id: int) -> Mapping[int, int]:
+def get_zone_info(garmin: garminconnect.Garmin, activity_id: int, description: Optional[str], duration: float) -> Mapping[int, int]:
+    if description is None:
+        description = ""
+    min_zone = 0
+    if "ZONE(1)" in description:
+        min_zone = 1
+    elif "ZONE(2)" in description:
+        min_zone = 2
+    elif "ZONE(3)" in description:
+        min_zone = 3
     resp = garmin.get_activity_hr_in_timezones(activity_id)
-    ret = {}
+    ret = make_empty_zone_map()
+    time_in_zones = 0 
     for zone in resp:
-        ret[zone['zoneNumber']] = zone['secsInZone']
+        zone_number = zone['zoneNumber']
+        if zone_number < min_zone:
+            zone_number = min_zone
+        ret[zone_number] += zone['secsInZone']
+        time_in_zones += zone['secsInZone']
+    if min_zone > 0:
+        time_in_zone_zero = duration - time_in_zones
+        ret[min_zone] += time_in_zone_zero
     return ret
 
 def get_activity_infos(garmin: garminconnect.Garmin, day_to_check: str) -> List[ActivityInfo]:
     activity_infos: List[ActivityInfo] = []
     all_activities_resp = garmin.get_activities_fordate(day_to_check)
     for activity in all_activities_resp['ActivitiesForDay']['payload']:
+        description = activity['description']
+        duration = activity['duration']
         activity_infos.append(ActivityInfo(
             id=activity['activityId'],
             start_time=parse(activity['startTimeLocal']),
-            end_time=parse(activity['startTimeLocal']) + timedelta(seconds=activity['duration']),
-            zone_info=get_zone_info(garmin, activity['activityId']),
+            end_time=parse(activity['startTimeLocal']) + timedelta(seconds=duration),
+            zone_info=get_zone_info(garmin, activity['activityId'], description, duration),
             name=activity['activityName'],
-            description=activity['description'],
+            description=description,
         ))
     return activity_infos
 
+def make_empty_zone_map() -> Mapping[int, int]:
+    return {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
 
 CACHED_ZONE_INFO: Mapping[str, Mapping[int, int]] = {}
 
@@ -78,7 +99,7 @@ def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str) ->
     activity_infos = get_activity_infos(garmin, day_to_check)
 
     # Merge together the zone info across all the activities
-    zone_to_elapsed_time = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    zone_to_elapsed_time = make_empty_zone_map()
     for activity in activity_infos:
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, activity.zone_info)
 
