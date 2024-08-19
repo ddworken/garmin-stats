@@ -73,7 +73,7 @@ def get_activity_infos(garmin: garminconnect.Garmin, day_to_check: str) -> List[
     activity_infos: List[ActivityInfo] = []
     all_activities_resp = garmin.get_activities_fordate(day_to_check)
     for activity in all_activities_resp['ActivitiesForDay']['payload']:
-        description = activity['description']
+        description = activity.get('description', 'None')
         duration = activity['duration']
         activity_infos.append(ActivityInfo(
             id=activity['activityId'],
@@ -115,16 +115,16 @@ def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
             ret[k] = ret.get(k, 0) + v
     return ret
 
-def average_time_in_zone_2_plus(garmin: garminconnect.Garmin, num_days: int, start_days_ago: int) -> timedelta:
+def calculate_load(garmin: garminconnect.Garmin, num_days: int, start_days_ago: int) -> timedelta:
     zone_to_elapsed_time = {}
     for days_ago in range(0, num_days):
         day_to_check = (date.today() - timedelta(days=days_ago) - timedelta(days=start_days_ago)).isoformat()
         ztet = get_zone_to_elapsed_time(garmin, day_to_check)
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, ztet)
-    return sum_zone_info_in_zone_2_plus(zone_to_elapsed_time)
+    return td_to_load(calculate_load_time(zone_to_elapsed_time))
 
-def sum_zone_info_in_zone_2_plus(ztet: Mapping[int, int]) -> timedelta:
-    return timedelta(seconds=ztet[2] + ztet[3] + ztet[4] + ztet[5])
+def calculate_load_time(ztet: Mapping[int, int]) -> timedelta:
+    return timedelta(seconds=(ztet[1] * 0.5) + ztet[2] + ztet[3] + ztet[4] + ztet[5])
 
 def td_to_load(td: timedelta) -> int:
     return math.floor(td.seconds/60)
@@ -149,15 +149,15 @@ def build_stats() -> str:
     garmin = authenticate()
     ret = ""
     ret += "Daily Load: "
-    ret += str(td_to_load(average_time_in_zone_2_plus(garmin, 1, 0)))
+    ret += str(calculate_load(garmin, 1, 0))
     ret += "\n"
     for activity in get_activity_infos(garmin, date.today().isoformat()):
-        ret += f"* {activity.name} ({activity.description}): {pretty_print_td(activity.end_time - activity.start_time)} - Load {td_to_load(sum_zone_info_in_zone_2_plus(activity.zone_info))}\n"
+        ret += f"* {activity.name} ({activity.description}): {pretty_print_td(activity.end_time - activity.start_time)} - Load {td_to_load(calculate_load_time(activity.zone_info))}\n"
     ret += "\n"
 
     ret += "Historical Daily Load:\n"
     for i in range(14):
-        load = td_to_load(average_time_in_zone_2_plus(garmin, 1, i))
+        load = calculate_load(garmin, 1, i)
         ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
         ret += lpad(str(load), 3)
         # Add a basic graph to visualize the trailing load
@@ -168,7 +168,7 @@ def build_stats() -> str:
 
     ret += "Historical Weekly Load Average:\n"
     for i in range(14):
-        load = td_to_load(average_time_in_zone_2_plus(garmin, 7, i))
+        load = calculate_load(garmin, 7, i)
         ret += f"{(date.today()-timedelta(days=i)).isoformat()}: Load "
         ret += lpad(str(load), 3)
         # Add a basic graph to visualize the trailing load
@@ -179,7 +179,7 @@ def build_stats() -> str:
 
     ret += "Historical Weekly Stats:\n"
     for week_num in range(0, 20):
-        load = td_to_load(average_time_in_zone_2_plus(garmin, 7, week_num*7))
+        load = calculate_load(garmin, 7, week_num*7)
         ret += f"Week of {(date.today()-timedelta(days=week_num*7)).isoformat()}: " 
         ret += lpad(str(load), 3)
         # Add a basic graph to visualize the trailing load
