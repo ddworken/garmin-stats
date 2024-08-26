@@ -5,22 +5,23 @@ import os
 from datetime import date, timedelta, datetime
 from dataclasses import dataclass
 from dateutil.parser import parse
-from flask import Flask, Response
+from flask import Flask, Response, send_file
 
 
 def timestamp_from_millis(ts: int) -> datetime:
-    return datetime.fromtimestamp(ts/1000)
+    return datetime.fromtimestamp(ts / 1000)
+
 
 def authenticate() -> garminconnect.Garmin:
-    email = ''
-    password =''
-    creds_path=os.path.expanduser('~/.garth/creds')
+    email = ""
+    password = ""
+    creds_path = os.path.expanduser("~/.garth/creds")
     if os.path.exists(creds_path):
         with open(creds_path) as f:
-            email, password = f.read().strip().split(':')
-    elif 'GARMIN_USERNAME' in os.environ and 'GARMIN_PASSWORD' in os.environ:
-        email = os.environ['GARMIN_USERNAME']
-        password = os.environ['GARMIN_PASSWORD']
+            email, password = f.read().strip().split(":")
+    elif "GARMIN_USERNAME" in os.environ and "GARMIN_PASSWORD" in os.environ:
+        email = os.environ["GARMIN_USERNAME"]
+        password = os.environ["GARMIN_PASSWORD"]
     else:
         raise Exception("No garmin credentials available!")
 
@@ -33,8 +34,9 @@ def authenticate() -> garminconnect.Garmin:
     print("Falling back to logging in via email/password")
     garmin = garminconnect.Garmin(email, password)
     garmin.login()
-    garmin.garth.dump( "~/.garth")
+    garmin.garth.dump("~/.garth")
     return garmin
+
 
 @dataclass
 class ActivityInfo:
@@ -42,10 +44,16 @@ class ActivityInfo:
     start_time: datetime
     end_time: datetime
     zone_info: Mapping[int, int]
-    name: str 
-    description: str 
+    name: str
+    description: str
 
-def get_zone_info(garmin: garminconnect.Garmin, activity_id: int, description: Optional[str], duration: float) -> Mapping[int, int]:
+
+def get_zone_info(
+    garmin: garminconnect.Garmin,
+    activity_id: int,
+    description: Optional[str],
+    duration: float,
+) -> Mapping[int, int]:
     if description is None:
         description = ""
     min_zone = 0
@@ -57,40 +65,53 @@ def get_zone_info(garmin: garminconnect.Garmin, activity_id: int, description: O
         min_zone = 3
     resp = garmin.get_activity_hr_in_timezones(activity_id)
     ret = make_empty_zone_map()
-    time_in_zones = 0 
+    time_in_zones = 0
     for zone in resp:
-        zone_number = zone['zoneNumber']
+        zone_number = zone["zoneNumber"]
         if zone_number < min_zone:
             zone_number = min_zone
-        ret[zone_number] += zone['secsInZone']
-        time_in_zones += zone['secsInZone']
+        ret[zone_number] += zone["secsInZone"]
+        time_in_zones += zone["secsInZone"]
     if min_zone > 0:
         time_in_zone_zero = duration - time_in_zones
         ret[min_zone] += time_in_zone_zero
     return ret
 
-def get_activity_infos(garmin: garminconnect.Garmin, day_to_check: str) -> List[ActivityInfo]:
+
+def get_activity_infos(
+    garmin: garminconnect.Garmin, day_to_check: str
+) -> List[ActivityInfo]:
     activity_infos: List[ActivityInfo] = []
     all_activities_resp = garmin.get_activities_fordate(day_to_check)
-    for activity in all_activities_resp['ActivitiesForDay']['payload']:
-        description = activity.get('description', 'None')
-        duration = activity['duration']
-        activity_infos.append(ActivityInfo(
-            id=activity['activityId'],
-            start_time=parse(activity['startTimeLocal']),
-            end_time=parse(activity['startTimeLocal']) + timedelta(seconds=duration),
-            zone_info=get_zone_info(garmin, activity['activityId'], description, duration),
-            name=activity['activityName'],
-            description=description,
-        ))
+    for activity in all_activities_resp["ActivitiesForDay"]["payload"]:
+        description = activity.get("description", "None")
+        duration = activity["duration"]
+        activity_infos.append(
+            ActivityInfo(
+                id=activity["activityId"],
+                start_time=parse(activity["startTimeLocal"]),
+                end_time=parse(activity["startTimeLocal"])
+                + timedelta(seconds=duration),
+                zone_info=get_zone_info(
+                    garmin, activity["activityId"], description, duration
+                ),
+                name=activity["activityName"],
+                description=description,
+            )
+        )
     return activity_infos
+
 
 def make_empty_zone_map() -> Mapping[int, int]:
     return {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
 
+
 CACHED_ZONE_INFO: Mapping[str, Mapping[int, int]] = {}
 
-def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str) -> Mapping[int, int]:
+
+def get_zone_to_elapsed_time(
+    garmin: garminconnect.Garmin, day_to_check: str
+) -> Mapping[int, int]:
     # Check if the result has already been cached
     if day_to_check in CACHED_ZONE_INFO:
         return CACHED_ZONE_INFO[day_to_check]
@@ -101,12 +122,18 @@ def get_zone_to_elapsed_time(garmin: garminconnect.Garmin, day_to_check: str) ->
     # Merge together the zone info across all the activities
     zone_to_elapsed_time = make_empty_zone_map()
     for activity in activity_infos:
-        zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, activity.zone_info)
+        zone_to_elapsed_time = merge_zone_times(
+            zone_to_elapsed_time, activity.zone_info
+        )
 
     # Store it in the cache if it is stable
-    if day_to_check != date.today().isoformat() and day_to_check != (date.today() - timedelta(days=1)).isoformat():
+    if (
+        day_to_check != date.today().isoformat()
+        and day_to_check != (date.today() - timedelta(days=1)).isoformat()
+    ):
         CACHED_ZONE_INFO[day_to_check] = zone_to_elapsed_time
     return zone_to_elapsed_time
+
 
 def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
     ret = {}
@@ -115,35 +142,45 @@ def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
             ret[k] = ret.get(k, 0) + v
     return ret
 
-def calculate_load(garmin: garminconnect.Garmin, num_days: int, start_days_ago: int) -> timedelta:
+
+def calculate_load(
+    garmin: garminconnect.Garmin, num_days: int, start_days_ago: int
+) -> timedelta:
     zone_to_elapsed_time = {}
     for days_ago in range(0, num_days):
-        day_to_check = (date.today() - timedelta(days=days_ago) - timedelta(days=start_days_ago)).isoformat()
+        day_to_check = (
+            date.today() - timedelta(days=days_ago) - timedelta(days=start_days_ago)
+        ).isoformat()
         ztet = get_zone_to_elapsed_time(garmin, day_to_check)
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, ztet)
     return td_to_load(calculate_load_time(zone_to_elapsed_time))
 
+
 def calculate_load_time(ztet: Mapping[int, int]) -> timedelta:
     return timedelta(seconds=(ztet[1] * 0.5) + ztet[2] + ztet[3] + ztet[4] + ztet[5])
 
+
 def td_to_load(td: timedelta) -> int:
-    return math.floor(td.seconds/60)
+    return math.floor(td.seconds / 60)
+
 
 def pretty_print_td(td: timedelta) -> str:
     days = td.days
-    hours = math.floor(td.seconds/60/60)
-    minutes = math.floor((td.seconds/60) % 60)
+    hours = math.floor(td.seconds / 60 / 60)
+    minutes = math.floor((td.seconds / 60) % 60)
     if days > 0:
         return f"{days} days, {hours} hours, and {minutes} minutes"
     if hours > 0:
         return f"{hours} hours and {minutes} minutes"
     return f"{minutes} minutes"
 
+
 def lpad(s: str, n: int) -> str:
     if len(s) >= n:
-        return s 
-    num_needed = n-len(s)
-    return (' '*num_needed)+s
+        return s
+    num_needed = n - len(s)
+    return (" " * num_needed) + s
+
 
 def build_stats() -> str:
     garmin = authenticate()
@@ -162,7 +199,7 @@ def build_stats() -> str:
         ret += lpad(str(load), 3)
         # Add a basic graph to visualize the trailing load
         ret += " "
-        ret += "-"*math.floor(load/10)
+        ret += "-" * math.floor(load / 10)
         ret += "\n"
     ret += "\n"
 
@@ -173,18 +210,18 @@ def build_stats() -> str:
         ret += lpad(str(load), 3)
         # Add a basic graph to visualize the trailing load
         ret += " "
-        ret += "-"*math.floor(load/10)
+        ret += "-" * math.floor(load / 10)
         ret += "\n"
     ret += "\n"
 
     ret += "Historical Weekly Stats:\n"
     for week_num in range(0, 20):
-        load = calculate_load(garmin, 7, week_num*7)
-        ret += f"Week of {(date.today()-timedelta(days=week_num*7)).isoformat()}: " 
+        load = calculate_load(garmin, 7, week_num * 7)
+        ret += f"Week of {(date.today()-timedelta(days=week_num*7)).isoformat()}: "
         ret += lpad(str(load), 3)
         # Add a basic graph to visualize the trailing load
         ret += " "
-        ret += "-"*math.floor(load/10)
+        ret += "-" * math.floor(load / 10)
         ret += "\n"
     ret += "\n"
 
@@ -195,15 +232,48 @@ def build_stats() -> str:
         ztet = get_zone_to_elapsed_time(garmin, day_to_check)
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, ztet)
     for i in range(0, 6):
-        ret += f"Zone {i}: {pretty_print_td(timedelta(seconds=zone_to_elapsed_time[i]))}\n"
+        ret += (
+            f"Zone {i}: {pretty_print_td(timedelta(seconds=zone_to_elapsed_time[i]))}\n"
+        )
     ret += "\n"
     return ret
 
+
 app = Flask(__name__)
 
-@app.route('/garmin-stats')
-def garmin_stats():
-    return Response(build_stats(), mimetype='text/plain')
 
-if __name__ == '__main__':
-    print(build_stats())
+@app.route("/garmin-stats")
+def garmin_stats():
+    return Response(build_stats(), mimetype="text/plain")
+
+
+def download_files():
+    garmin = authenticate()
+    activities = garmin.get_activities_by_date(
+        '2023-01-01', '2024-08-16'
+    )
+    print(f"{len(activities)=}")
+    for i, activity in enumerate(activities):
+        activity_id = activity["activityId"]
+        activity_name = activity["activityName"]
+        if activity_name in {'Elliptical', 'Indoor Climbing', 'Indoor Rowing', 'Treadmill Running', 'Strength', 'Cardio', 'Seattle Walking', 'Seattle Running', 'Stair Stepper', 'Indoor Cycling'}:
+            continue
+        print(f"{i=}/{len(activities)} {activity_name=}")
+
+        gpx_data = garmin.download_activity(
+            activity_id, dl_fmt=garmin.ActivityDownloadFormat.GPX
+        )
+        output_file = f"./gpx-export/{activity_name}-{activity_id}.gpx"
+        with open(output_file, "wb") as fb:
+            fb.write(gpx_data)
+
+
+@app.route("/")
+def index():
+    return send_file('index.html')
+
+
+
+if __name__ == "__main__":
+    # print(build_stats())
+    download_files()
