@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exercise by Day</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+    <style>
+        .line {
+            fill: none;
+            stroke: steelblue;
+            stroke-width: 2px;
+        }
+        .axis-label {
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <center>
+        <h1 style="font-size: 36px; color: #333; margin-bottom: 20px;">Exercise Stats</h1>
+        <hr style="margin-bottom: 30px;">
+        <div id="todayLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
+        <div id="weeklyLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
+    </center>
+    <div id="chart"></div>
+
+    <script>
+    function fetchTodayLoad() {
+        fetch('/api/today')
+            .then(response => response.json())
+            .then(data => {
+                const dailyLoadElement = document.getElementById('todayLoad');
+                dailyLoadElement.textContent = `Daily Load: ${data.daily_load}`;
+                
+                // Add CSS based on daily load value
+                if (data.daily_load > 60) {
+                    dailyLoadElement.style.backgroundColor = 'green';
+                } else if (data.daily_load >= 30 && data.daily_load <= 60) {
+                    dailyLoadElement.style.backgroundColor = 'yellow';
+                } else {
+                    dailyLoadElement.style.backgroundColor = 'red';
+                }
+
+                const weeklyLoadElement = document.getElementById('weeklyLoad');
+                
+                // Add CSS based on weekly load value
+                if (data.weekly_load > 400) {
+                    weeklyLoadElement.style.backgroundColor = 'green';
+                } else if (data.weekly_load >= 250 && data.weekly_load <= 400) {
+                    weeklyLoadElement.style.backgroundColor = 'yellow';
+                } else {
+                    weeklyLoadElement.style.backgroundColor = 'red';
+                }
+
+                
+                document.getElementById('weeklyLoad').textContent = `Weekly Load: ${data.weekly_load}`;
+                let tableHtml = '<br><table id="eventsTable" style="margin: 0 auto; margin-top: 50px; border-collapse: collapse; margin-bottom: 20px;">';
+                tableHtml += '<tr><th style="border: 1px solid black; padding: 5px;">Activity</th><th style="border: 1px solid black; padding: 5px;">Load</th></tr>';
+                tableHtml += '</table>';
+                document.getElementById('weeklyLoad').insertAdjacentHTML('afterend', tableHtml);
+
+                data.events.forEach(event => {
+                    const tr = document.createElement('tr');
+                    
+                    const tdName = document.createElement('td');
+                    tdName.style.border = '1px solid black';
+                    tdName.style.padding = '5px';
+                    tdName.textContent = `${event.name} (${event.description})`;
+                    tr.appendChild(tdName);
+                    
+                    const tdLoad = document.createElement('td');
+                    tdLoad.style.border = '1px solid black';
+                    tdLoad.style.padding = '5px';
+                    tdLoad.textContent = event.load;
+                    tr.appendChild(tdLoad);
+                    
+                    document.getElementById('eventsTable').appendChild(tr);
+                });                
+            })
+            .catch(error => {
+                console.error('Error fetching today\'s load:', error);
+                document.getElementById('todayLoad').textContent = 'Error fetching today\'s load';
+            });
+    }   
+
+    fetchTodayLoad();
+    </script>
+
+    <script>
+        // Set the dimensions and margins of the graph
+        const margin = {top: 20, right: 100, bottom: 50, left: 70};
+        const width = 960 - margin.left - margin.right;
+        const height = 500 - margin.top - margin.bottom;
+
+        // Append the svg object to the body of the page
+        const svg = d3.select("#chart")
+            .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        // Function to get URL parameters
+        function getUrlParameter(name) {
+            name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+            var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+            var results = regex.exec(location.search);
+            return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+        };
+
+        // Get the 'n' parameter from the URL, default to 90 if not present
+        const n = getUrlParameter('n') || 90;
+
+        // Get both stats and events data
+        Promise.all([
+            d3.json(`/api/stats?n=${n}`),
+            d3.json(`/api/events?n=${n}`)
+        ]).then(function([data, events]) {
+            // Parse the date and convert exercise quantity to number
+            const parseDate = d3.timeParse("%Y-%m-%d");
+            data.forEach(d => {
+                d.date = parseDate(d.date);
+                d.quantity = +d.quantity;
+            });
+
+            events.forEach(e => {
+                e.date = parseDate(e.date);
+            });
+
+            // Set the ranges
+            const x = d3.scaleTime().range([0, width]);
+            const y = d3.scaleLinear().range([height, 0]);
+
+            // Define the line
+            const valueline = d3.line()
+                .x(d => x(d.date))
+                .y(d => y(d.quantity));
+
+            // Scale the range of the data
+            x.domain(d3.extent(data, d => d.date));
+            y.domain([0, d3.max(data, d => d.quantity)]);
+
+            // Add the valueline path
+            svg.append("path")
+                .data([data])
+                .attr("class", "line")
+                .attr("d", valueline);
+
+            // Add the X Axis
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x));
+
+            // Add the Y Axis
+            svg.append("g")
+                .call(d3.axisLeft(y));
+
+            // Add X axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("text-anchor", "middle")
+                .attr("x", width / 2)
+                .attr("y", height + margin.bottom - 10)
+                .text("Date");
+
+            // Add Y axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("text-anchor", "middle")
+                .attr("transform", "rotate(-90)")
+                .attr("y", -margin.left + 20)
+                .attr("x", -height / 2)
+                .text("Exercise Quantity");
+            // Add blue dots for events with event names
+            const eventGroup = svg.selectAll(".event-group")
+                .data(events)
+                .enter().append("g")
+                .attr("class", "event-group")
+                .attr("transform", d => {
+                    const dataPoint = data.find(item => item.date.getTime() === d.date.getTime());
+                    return `translate(${x(d.date)},${dataPoint ? y(dataPoint.quantity) : 0})`;
+                });
+
+            eventGroup.append("circle")
+                .attr("class", "event-dot")
+                .attr("r", 5)
+                .style("fill", "blue");
+
+            eventGroup.append("text")
+                .attr("x", 8)
+                .attr("y", 4)
+                .text(d => d.eventName)
+                .style("font-size", "10px")
+                .style("fill", "blue");
+
+            // Add blue dots for events
+            svg.selectAll(".event-dot")
+                .data(events)
+                .enter().append("circle")
+                .attr("class", "event-dot")
+                .attr("cx", d => x(d.date))
+                .attr("cy", d => {
+                    const dataPoint = data.find(item => item.date.getTime() === d.date.getTime());
+                    return dataPoint ? y(dataPoint.quantity) : 0;
+                })
+                .attr("r", 5)
+                .style("fill", "blue");
+
+            // Create a group for the tooltip
+            const tooltip = svg.append("g")
+                .attr("class", "tooltip")
+                .style("display", "none");
+
+            // Add a circle to the tooltip group
+            tooltip.append("circle")
+                .attr("r", 4)
+                .style("fill", "red");
+
+            // Add text to the tooltip group
+            tooltip.append("text")
+                .attr("x", 9)
+                .attr("dy", ".35em");
+
+            // Create a rect to capture mouse movements
+            svg.append("rect")
+                .attr("width", width)
+                .attr("height", height)
+                .style("fill", "none")
+                .style("pointer-events", "all")
+                .on("mouseover", () => tooltip.style("display", null))
+                .on("mouseout", () => tooltip.style("display", "none"))
+                .on("mousemove", mousemove);
+
+            // Function to handle mouse movement
+            function mousemove(event) {
+                const bisect = d3.bisector(d => {const p = (d.date); return p ? p.getTime() : 0}).left;
+                const x0 = x.invert(d3.pointer(event)[0]).getTime();
+                // console.log(`Calling bisect(data=${data}, x0=${x0}, 1)`)
+                // console.log(`dates=${data.map(d => {const p = (d.date); return p ? p.getTime() : 0})}`)
+                const rd = structuredClone(data);
+                rd.reverse();
+                const i = bisect(rd, x0, 0);
+                // console.log(`i=${i}`)
+                const d0 = rd[i - 1];
+                const d1 = rd[i];
+                const d = d1;
+                if (d0 && d1) {
+                    console.log('a')
+                    const d = x0 - d0.date > d1.date - x0 ? d1 : d0;
+                } else {
+                    console.log('b')
+                }
+                tooltip.attr("transform", `translate(${x(d.date)},${y(d.quantity)})`);
+                tooltip.select("text").text(`${d.quantity}`);
+            }
+        });
+    </script>
+</body>
+</html>

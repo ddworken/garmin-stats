@@ -5,8 +5,8 @@ import os
 from datetime import date, timedelta, datetime
 from dataclasses import dataclass
 from dateutil.parser import parse
-from flask import Flask, Response, send_file
-
+from flask import Flask, Response, send_file, request 
+import json 
 
 def timestamp_from_millis(ts: int) -> datetime:
     return datetime.fromtimestamp(ts / 1000)
@@ -77,10 +77,14 @@ def get_zone_info(
         ret[min_zone] += time_in_zone_zero
     return ret
 
+# Cache to store activity infos for each day
+CACHED_ACTIVITY_INFOS: Mapping[str, List[ActivityInfo]] = {}
 
 def get_activity_infos(
     garmin: garminconnect.Garmin, day_to_check: str
 ) -> List[ActivityInfo]:
+    if day_to_check in CACHED_ACTIVITY_INFOS:
+        return CACHED_ACTIVITY_INFOS[day_to_check]
     activity_infos: List[ActivityInfo] = []
     all_activities_resp = garmin.get_activities_fordate(day_to_check)
     for activity in all_activities_resp["ActivitiesForDay"]["payload"]:
@@ -99,6 +103,8 @@ def get_activity_infos(
                 description=description,
             )
         )
+    if is_stable_day(day_to_check):
+        CACHED_ACTIVITY_INFOS[day_to_check] = activity_infos
     return activity_infos
 
 
@@ -127,12 +133,13 @@ def get_zone_to_elapsed_time(
         )
 
     # Store it in the cache if it is stable
-    if (
-        day_to_check != date.today().isoformat()
-        and day_to_check != (date.today() - timedelta(days=1)).isoformat()
-    ):
+    if is_stable_day(day_to_check):
         CACHED_ZONE_INFO[day_to_check] = zone_to_elapsed_time
     return zone_to_elapsed_time
+
+
+def is_stable_day(day_to_check: str) -> bool:
+    return day_to_check != date.today().isoformat()        and day_to_check != (date.today() - timedelta(days=1)).isoformat()
 
 
 def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
@@ -268,12 +275,79 @@ def download_files():
             fb.write(gpx_data)
 
 
-@app.route("/")
+@app.route("/graph.html")
 def index():
-    return send_file('index.html')
+    return send_file('graph.html')
 
+@app.route("/api/stats")
+def api_stats():
+    garmin = authenticate()
+    today = date.today()
+    stats = []
+
+    for days_ago in range(int(request.args.get('n', 90))):
+        load = calculate_load(garmin, 7, days_ago)
+        stats.append({
+            "date": (today - timedelta(days=days_ago)).isoformat(),
+            "quantity": load
+        })
+    
+    return Response(json.dumps(stats), mimetype="application/json")
+
+@app.route("/api/events")
+def api_events():
+    garmin = authenticate()
+    today = date.today()
+    events = []
+
+    # Fetch activities for the last 90 days
+    n_days = int(request.args.get('n', 90))  # Get 'n' from query params, default to 90
+    for days_ago in range(n_days):
+        day_to_check = (today - timedelta(days=days_ago)).isoformat()
+        activities = get_activity_infos(garmin, day_to_check)
+        
+        for activity in activities:
+            duration = (activity.end_time - activity.start_time).total_seconds() / 3600  # Convert to hours
+            if duration > 6:
+                events.append({
+                    "date": activity.start_time.date().isoformat(),
+                    "eventName": activity.name
+                })
+    return Response(json.dumps(events), mimetype="application/json")
+
+@app.route("/api/today")
+def api_today():
+    garmin = authenticate()
+    
+    # Calculate today's total load
+    today_load = calculate_load(garmin, 1, 0)
+    
+    # Get today's activities
+    today = date.today().isoformat()
+    activities = get_activity_infos(garmin, today)
+    
+    # Prepare the events list
+    events = []
+    for activity in activities:
+        event_load = td_to_load(calculate_load_time(activity.zone_info))
+        events.append({
+            "name": activity.name,
+            "description": activity.description,
+            "load": event_load
+        })
+    
+    # Prepare the response
+    response_data = {
+        "date": today,
+        "daily_load": today_load,
+        "weekly_load": calculate_load(garmin, 7, 0),
+        "events": events
+    }
+    
+    return Response(json.dumps(response_data), mimetype="application/json")
 
 
 if __name__ == "__main__":
     # print(build_stats())
-    download_files()
+    # download_files()
+    pass  
