@@ -70,7 +70,7 @@
                     const tdName = document.createElement('td');
                     tdName.style.border = '1px solid black';
                     tdName.style.padding = '5px';
-                    tdName.textContent = `${event.name} (${event.description})`;
+                    tdName.textContent = event.description ? `${event.name} (${event.description})` : event.name;
                     tr.appendChild(tdName);
                     
                     const tdLoad = document.createElement('td');
