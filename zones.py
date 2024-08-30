@@ -5,8 +5,12 @@ import os
 from datetime import date, timedelta, datetime
 from dataclasses import dataclass
 from dateutil.parser import parse
-from flask import Flask, Response, send_file, request 
+from flask import Flask, Response, send_file, request, copy_current_request_context
 import json 
+from flask_caching import Cache
+import threading
+from functools import wraps
+
 
 def timestamp_from_millis(ts: int) -> datetime:
     return datetime.fromtimestamp(ts / 1000)
@@ -45,7 +49,8 @@ class ActivityInfo:
     end_time: datetime
     zone_info: Mapping[int, int]
     name: str
-    description: str
+    description: Optional[str]
+    distance: float
 
 
 def get_zone_info(
@@ -88,7 +93,7 @@ def get_activity_infos(
     activity_infos: List[ActivityInfo] = []
     all_activities_resp = garmin.get_activities_fordate(day_to_check)
     for activity in all_activities_resp["ActivitiesForDay"]["payload"]:
-        description = activity.get("description", "None")
+        description = activity.get("description", None)
         duration = activity["duration"]
         activity_infos.append(
             ActivityInfo(
@@ -101,6 +106,7 @@ def get_activity_infos(
                 ),
                 name=activity["activityName"],
                 description=description,
+                distance=activity.get("distance", 0)*0.00062137, # convert meters to miles
             )
         )
     if is_stable_day(day_to_check):
@@ -247,6 +253,13 @@ def build_stats() -> str:
 
 
 app = Flask(__name__)
+config = {
+    "DEBUG": True,          # some Flask specific configs
+    "CACHE_TYPE": "SimpleCache",  # Flask-Caching related configs
+    "CACHE_DEFAULT_TIMEOUT": 300
+}
+app.config.from_mapping(config)
+cache = Cache(app)
 
 
 @app.route("/garmin-stats")
@@ -279,22 +292,50 @@ def download_files():
 def index():
     return send_file('graph.html')
 
+def cached_with_background_refresh(timeout=300, query_string=True):
+    def decorator(func):
+        @wraps(func)
+        @cache.cached(timeout=timeout, query_string=query_string, unless=lambda: not request.args.get('ec'))
+        def cached_func(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            result = cached_func(*args, **kwargs)
+
+            @copy_current_request_context
+            def func_with_context(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            # Start a background thread to refresh the cache
+            if request.args.get('ec'):
+                thread = threading.Thread(target=func_with_context, args=args, kwargs=kwargs)
+                thread.start()
+            
+            return result
+
+        return wrapper
+    return decorator
+
+
 @app.route("/api/stats")
-def api_stats():
+@cached_with_background_refresh()
+def api_stats():    
     garmin = authenticate()
     today = date.today()
     stats = []
 
     for days_ago in range(int(request.args.get('n', 90))):
-        load = calculate_load(garmin, 7, days_ago)
+        load = calculate_load(garmin, int(request.args.get('load_period', 90)), days_ago)
         stats.append({
             "date": (today - timedelta(days=days_ago)).isoformat(),
             "quantity": load
         })
-    
+
     return Response(json.dumps(stats), mimetype="application/json")
 
 @app.route("/api/events")
+@cached_with_background_refresh()
 def api_events():
     garmin = authenticate()
     today = date.today()
@@ -315,7 +356,10 @@ def api_events():
                 })
     return Response(json.dumps(events), mimetype="application/json")
 
+
+
 @app.route("/api/today")
+@cached_with_background_refresh()
 def api_today():
     garmin = authenticate()
     
@@ -330,9 +374,12 @@ def api_today():
     events = []
     for activity in activities:
         event_load = td_to_load(calculate_load_time(activity.zone_info))
+        description = activity.description
+        if not description and activity.distance > 0:
+            description = f"{activity.distance:.2f} miles"
         events.append({
             "name": activity.name,
-            "description": activity.description,
+            "description": description,
             "load": event_load
         })
     

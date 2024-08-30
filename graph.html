@@ -27,7 +27,11 @@
 
     <script>
     function fetchTodayLoad() {
-        fetch('/api/today')
+        // Get the 'ec' parameter from the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const ec = urlParams.get('ec') || '';
+
+        fetch(`/api/today?ec=${ec}`)
             .then(response => response.json())
             .then(data => {
                 const dailyLoadElement = document.getElementById('todayLoad');
@@ -111,11 +115,13 @@
 
         // Get the 'n' parameter from the URL, default to 90 if not present
         const n = getUrlParameter('n') || 90;
+        const load_period = getUrlParameter('load_period') || 7;
+        const ec = getUrlParameter('ec') || '';
 
         // Get both stats and events data
         Promise.all([
-            d3.json(`/api/stats?n=${n}`),
-            d3.json(`/api/events?n=${n}`)
+            d3.json(`/api/stats?n=${n}&load_period=${load_period}&ec=${ec}`),
+            d3.json(`/api/events?n=${n}&ec=${ec}`)
         ]).then(function([data, events]) {
             // Parse the date and convert exercise quantity to number
             const parseDate = d3.timeParse("%Y-%m-%d");
