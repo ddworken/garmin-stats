@@ -22,6 +22,8 @@
         <hr style="margin-bottom: 30px;">
         <div id="todayLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
         <div id="weeklyLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
+        <div id="restingHeartRate" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
+        <div id="sleepScore" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
     </center>
     <div id="chart"></div>
 
@@ -34,35 +36,54 @@
         fetch(`/api/today?ec=${ec}`)
             .then(response => response.json())
             .then(data => {
+                // Daily Load
                 const dailyLoadElement = document.getElementById('todayLoad');
                 dailyLoadElement.textContent = `Daily Load: ${data.daily_load}`;
-                
-                // Add CSS based on daily load value
                 if (data.daily_load > 60) {
                     dailyLoadElement.style.backgroundColor = 'green';
-                } else if (data.daily_load >= 30 && data.daily_load <= 60) {
+                } else if (data.daily_load >= 30) {
                     dailyLoadElement.style.backgroundColor = 'yellow';
                 } else {
                     dailyLoadElement.style.backgroundColor = 'red';
                 }
 
+                // Weekly Load
                 const weeklyLoadElement = document.getElementById('weeklyLoad');
-                
-                // Add CSS based on weekly load value
+                weeklyLoadElement.textContent = `Weekly Load: ${data.weekly_load}`;
                 if (data.weekly_load > 400) {
                     weeklyLoadElement.style.backgroundColor = 'green';
-                } else if (data.weekly_load >= 250 && data.weekly_load <= 400) {
+                } else if (data.weekly_load >= 250) {
                     weeklyLoadElement.style.backgroundColor = 'yellow';
                 } else {
                     weeklyLoadElement.style.backgroundColor = 'red';
                 }
 
-                
-                document.getElementById('weeklyLoad').textContent = `Weekly Load: ${data.weekly_load}`;
+                // Resting Heart Rate
+                const rhrElement = document.getElementById('restingHeartRate');
+                rhrElement.textContent = `RHR: ${data.resting_heart_rate}`;
+                if (data.resting_heart_rate < 58) {
+                    rhrElement.style.backgroundColor = 'green';
+                } else if (data.weekly_load <= 60 ) {
+                    rhrElement.style.backgroundColor = 'yellow';
+                } else {
+                    rhrElement.style.backgroundColor = 'red';
+                }
+
+                // Sleep Score
+                const sleepScoreElement = document.getElementById('sleepScore');
+                sleepScoreElement.textContent = `Sleep Score: ${data.sleep_score}`;
+                if (data.sleep_score >= 80) {
+                    sleepScoreElement.style.backgroundColor = 'green';
+                } else if (data.sleep_score >= 70) {
+                    sleepScoreElement.style.backgroundColor = 'yellow';
+                } else {
+                    sleepScoreElement.style.backgroundColor = 'red';
+                }
+
                 let tableHtml = '<br><table id="eventsTable" style="margin: 0 auto; margin-top: 50px; border-collapse: collapse; margin-bottom: 20px;">';
                 tableHtml += '<tr><th style="border: 1px solid black; padding: 5px;">Activity</th><th style="border: 1px solid black; padding: 5px;">Load</th></tr>';
                 tableHtml += '</table>';
-                document.getElementById('weeklyLoad').insertAdjacentHTML('afterend', tableHtml);
+                sleepScoreElement.insertAdjacentHTML('afterend', tableHtml);
 
                 data.events.forEach(event => {
                     const tr = document.createElement('tr');

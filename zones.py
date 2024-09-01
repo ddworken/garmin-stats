@@ -380,7 +380,7 @@ def api_today():
         events.append({
             "name": activity.name,
             "description": description,
-            "load": event_load
+            "load": event_load,
         })
     
     # Prepare the response
@@ -388,7 +388,9 @@ def api_today():
         "date": today,
         "daily_load": today_load,
         "weekly_load": calculate_load(garmin, 7, 0),
-        "events": events
+        "events": events,
+        "resting_heart_rate": garmin.get_rhr_day(today)['allMetrics']['metricsMap']['WELLNESS_RESTING_HEART_RATE'][0]['value'],
+        "sleep_score": garmin.get_sleep_data(today)['dailySleepDTO']['sleepScores']['overall']['value'],
     }
     
     return Response(json.dumps(response_data), mimetype="application/json")
