@@ -5,4 +5,4 @@ build:
 
 deploy: build
 	ssh server "docker push gcr.io/dworken-k8s/garmin"
-	ssh monoserver "cd ~/infra/ && docker compose pull garmin && docker compose rm -svf garmin && docker compose up -d garmin"
+	ssh monoserver "cd ~/code/infra/ && docker compose pull garmin && docker compose rm -svf garmin && docker compose up -d garmin"
