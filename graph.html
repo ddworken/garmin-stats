@@ -22,6 +22,7 @@
         <hr style="margin-bottom: 30px;">
         <div id="todayLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
         <div id="weeklyLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
+        <div id="weeklyStrengthLoad" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
         <div id="restingHeartRate" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
         <div id="sleepScore" style="display: inline; border-radius: 30px; width: 200px; padding: 20px; text-align: center; margin-bottom: 20px; font-size: 24px; font-weight: bold;"></div>
     </center>
@@ -56,6 +57,17 @@
                     weeklyLoadElement.style.backgroundColor = 'yellow';
                 } else {
                     weeklyLoadElement.style.backgroundColor = 'red';
+                }
+
+                // Weekly Strength Load
+                const weeklyStrengthLoadElement = document.getElementById('weeklyStrengthLoad');
+                weeklyStrengthLoadElement.textContent = `Weekly Strength Load: ${data.weekly_strength_load}`;
+                if (data.weekly_load > 200) {
+                    weeklyStrengthLoadElement.style.backgroundColor = 'green';
+                } else if (data.weekly_load > 100) {
+                    weeklyStrengthLoadElement.style.backgroundColor = 'yellow';
+                } else {
+                    weeklyStrengthLoadElement.style.backgroundColor = 'red';
                 }
 
                 // Resting Heart Rate

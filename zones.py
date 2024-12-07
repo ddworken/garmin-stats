@@ -158,7 +158,7 @@ def merge_zone_times(*zone_times: Mapping[int, int]) -> Mapping[int, int]:
 
 def calculate_load(
     garmin: garminconnect.Garmin, num_days: int, start_days_ago: int
-) -> timedelta:
+) -> int:
     zone_to_elapsed_time = {}
     for days_ago in range(0, num_days):
         day_to_check = (
@@ -168,6 +168,19 @@ def calculate_load(
         zone_to_elapsed_time = merge_zone_times(zone_to_elapsed_time, ztet)
     return td_to_load(calculate_load_time(zone_to_elapsed_time))
 
+def calculate_strength_load(
+            garmin: garminconnect.Garmin, num_days: int, start_days_ago: int
+) -> int:
+    sum = 0 
+    for days_ago in range(0, num_days):
+        day_to_check = (
+            date.today() - timedelta(days=days_ago) - timedelta(days=start_days_ago)
+        ).isoformat()
+        activities = get_activity_infos(garmin, day_to_check)
+        for activity in activities:
+            if activity.name == 'Strength':
+                sum += (activity.end_time-activity.start_time).seconds / 60
+    return int(sum) 
 
 def calculate_load_time(ztet: Mapping[int, int]) -> timedelta:
     return timedelta(seconds=(ztet[1] * 0.5) + ztet[2] + ztet[3] + ztet[4] + ztet[5])
@@ -329,7 +342,8 @@ def api_stats():
         load = calculate_load(garmin, int(request.args.get('load_period', 90)), days_ago)
         stats.append({
             "date": (today - timedelta(days=days_ago)).isoformat(),
-            "quantity": load
+            "quantity": load,
+            "strength_load": calculate_strength_load(garmin, int(request.args.get('load_period', 90)), days_ago)
         })
 
     return Response(json.dumps(stats), mimetype="application/json")
@@ -388,6 +402,7 @@ def api_today():
         "date": today,
         "daily_load": today_load,
         "weekly_load": calculate_load(garmin, 7, 0),
+        "weekly_strength_load": calculate_strength_load(garmin, 7, 0),
         "events": events,
         "resting_heart_rate": garmin.get_rhr_day(today)['allMetrics']['metricsMap']['WELLNESS_RESTING_HEART_RATE'][0]['value'],
         "sleep_score": garmin.get_sleep_data(today)['dailySleepDTO']['sleepScores']['overall']['value'],
@@ -399,4 +414,5 @@ def api_today():
 if __name__ == "__main__":
     # print(build_stats())
     # download_files()
+    print(calculate_strength_load(authenticate(), 7, 0))
     pass  
