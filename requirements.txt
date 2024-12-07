@@ -1,4 +1,4 @@
 python-dateutil
-garminconnect
+garminconnect>=0.2.23
 flask
 Flask-Caching
